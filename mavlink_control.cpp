@@ -54,7 +54,11 @@
 // ------------------------------------------------------------------------------
 
 #include "mavlink_control.h"
+#include <linux/types.h>
+#include <cstdio>
+#include "lidarlite_v3.h"
 
+LIDARLite_v3 myLidarLite;
 
 // ------------------------------------------------------------------------------
 //   TOP
@@ -193,39 +197,6 @@ commands(Autopilot_Interface &api)
 
 	// autopilot_interface.h provides some helper functions to build the command
 
-
-	// Example 1 - Set Velocity
-//	set_velocity( -1.0       , // [m/s]
-//				  -1.0       , // [m/s]
-//				   0.0       , // [m/s]
-//				   sp        );
-
-	// Example 2 - Set Position
-	 set_position( ip.x - 5.0 , // [m]
-			 	   ip.y - 5.0 , // [m]
-				   ip.z       , // [m]
-				   sp         );
-
-
-	// Example 1.2 - Append Yaw Command
-	set_yaw( ip.yaw , // [rad]
-			 sp     );
-
-	// SEND THE COMMAND
-	api.update_setpoint(sp);
-	// NOW pixhawk will try to move
-
-	// Wait for 8 seconds, check position
-	for (int i=0; i < 8; i++)
-	{
-		mavlink_local_position_ned_t pos = api.current_messages.local_position_ned;
-		printf("%i CURRENT POSITION XYZ = [ % .4f , % .4f , % .4f ] \n", i, pos.x, pos.y, pos.z);
-		sleep(1);
-	}
-
-	printf("\n");
-
-
 	// --------------------------------------------------------------------------
 	//   STOP OFFBOARD MODE
 	// --------------------------------------------------------------------------
@@ -244,22 +215,15 @@ commands(Autopilot_Interface &api)
 	Mavlink_Messages messages = api.current_messages;
 
 	// local position in ned frame
-	mavlink_local_position_ned_t pos = messages.local_position_ned;
+	mavlink_attitude_t pos = messages.attitude;
 	printf("Got message LOCAL_POSITION_NED (spec: https://mavlink.io/en/messages/common.html#LOCAL_POSITION_NED)\n");
-	printf("    pos  (NED):  %f %f %f (m)\n", pos.x, pos.y, pos.z );
+	printf("    pos  (NED):  %f %f %f (m)\n", pos.pitch, pos.roll, pos.yaw);
 
 	// hires imu
 	mavlink_highres_imu_t imu = messages.highres_imu;
 	printf("Got message HIGHRES_IMU (spec: https://mavlink.io/en/messages/common.html#HIGHRES_IMU)\n");
 	printf("    ap time:     %lu \n", imu.time_usec);
-	printf("    acc  (NED):  % f % f % f (m/s^2)\n", imu.xacc , imu.yacc , imu.zacc );
-	printf("    gyro (NED):  % f % f % f (rad/s)\n", imu.xgyro, imu.ygyro, imu.zgyro);
-	printf("    mag  (NED):  % f % f % f (Ga)\n"   , imu.xmag , imu.ymag , imu.zmag );
-	printf("    baro:        %f (mBar) \n"  , imu.abs_pressure);
 	printf("    altitude:    %f (m) \n"     , imu.pressure_alt);
-	printf("    temperature: %f C \n"       , imu.temperature );
-
-	printf("\n");
 
 
 	// --------------------------------------------------------------------------
@@ -356,6 +320,32 @@ quit_handler( int sig )
 int
 main(int argc, char **argv)
 {
+	__u16 distance;
+    __u8  busyFlag;
+
+    // Initialize i2c peripheral in the cpu core
+    myLidarLite.i2c_init();
+
+    // Optionally configure LIDAR-Lite
+    myLidarLite.configure(0);
+    
+    while(1)
+    {
+        // Each time through the loop, check BUSY
+        busyFlag = myLidarLite.getBusyFlag();
+
+        if (busyFlag == 0x00)
+        {
+            // When no longer busy, immediately initialize another measurement
+            // and then read the distance data from the last measurement.
+            // This method will result in faster I2C rep rates.
+            myLidarLite.takeRange();
+            distance = myLidarLite.readDistance();
+
+            printf("%4d\n", distance);
+        }
+    }
+    
 	// This program uses throw, wrap one big try/catch here
 	try
 	{
