@@ -59,6 +59,9 @@
 #include "lidarlite_v3.h"
 
 LIDARLite_v3 myLidarLite;
+__u16 lidar_distance;
+__u8  busyFlag;
+
 
 // ------------------------------------------------------------------------------
 //   TOP
@@ -146,7 +149,6 @@ top (int argc, char **argv)
 	 */
 	commands(autopilot_interface);
 
-
 	// --------------------------------------------------------------------------
 	//   THREAD and PORT SHUTDOWN
 	// --------------------------------------------------------------------------
@@ -189,7 +191,7 @@ commands(Autopilot_Interface &api)
 	// --------------------------------------------------------------------------
 	//   SEND OFFBOARD COMMANDS
 	// --------------------------------------------------------------------------
-	printf("SEND OFFBOARD COMMANDS\n");
+	//printf("SEND OFFBOARD COMMANDS\n");
 
 	// initialize command data strtuctures
 	mavlink_set_position_target_local_ned_t sp;
@@ -211,20 +213,42 @@ commands(Autopilot_Interface &api)
 	// --------------------------------------------------------------------------
 	printf("READ SOME MESSAGES \n");
 
-	// copy current messages
-	Mavlink_Messages messages = api.current_messages;
+	while(1)
+	{
+            // Each time through the loop, check BUSY
+            busyFlag = myLidarLite.getBusyFlag();
+            if (busyFlag == 0x00)
+            {
 
-	// local position in ned frame
-	mavlink_attitude_t pos = messages.attitude;
-	printf("Got message LOCAL_POSITION_NED (spec: https://mavlink.io/en/messages/common.html#LOCAL_POSITION_NED)\n");
-	printf("    pos  (NED):  %f %f %f (m)\n", pos.pitch, pos.roll, pos.yaw);
+      	        // copy current messages
+	        Mavlink_Messages messages = api.current_messages;
+	        // local position in ned frame
+	        mavlink_attitude_t att = messages.attitude;
+	        //printf("Got message LOCAL_POSITION_NED (spec: https://mavlink.io/en/messages/common.html#LOCAL_POSITION_NED)\n");
+	        //printf("    yaw  (NED):  %f \n", pos.yaw);
 
-	// hires imu
-	mavlink_highres_imu_t imu = messages.highres_imu;
-	printf("Got message HIGHRES_IMU (spec: https://mavlink.io/en/messages/common.html#HIGHRES_IMU)\n");
-	printf("    ap time:     %lu \n", imu.time_usec);
-	printf("    altitude:    %f (m) \n"     , imu.pressure_alt);
+     	        // hires imu
+	        mavlink_local_position_ned_t pos = messages.local_position_ned;
+	        //printf("Got message HIGHRES_IMU (spec: https://mavlink.io/en/messages/common.html#HIGHRES_IMU)\n");
+	    	//printf("    ap time:     %lu \n", imu.time_usec);
+	    	//printf("%3f %3f\n", pos.yaw, imu.pressure_alt);
 
+            	// When no longer busy, immediately initialize another measurement
+                // and then read the distance data from the last measurement.
+                // This method will result in faster I2C rep rates.
+                myLidarLite.takeRange();
+                lidar_distance = myLidarLite.readDistance();
+
+		float height = pos.z;
+		float yaw = att.yaw;
+		int depth = lidar_distance;
+
+                //printf("%3f %3f %4d\n", pos.yaw, imu.pressure_alt, lidar_distance);
+		printf("%d %1f %d\n", (int)(lidar_distance*cos(yaw)), height, (int)(lidar_distance*sin(yaw)));
+            }
+
+            usleep(1000);
+	}
 
 	// --------------------------------------------------------------------------
 	//   END OF COMMANDS
@@ -320,8 +344,8 @@ quit_handler( int sig )
 int
 main(int argc, char **argv)
 {
-	__u16 distance;
-    __u8  busyFlag;
+//    __u16 lidar_distance;
+  //  __u8  busyFlag;
 
     // Initialize i2c peripheral in the cpu core
     myLidarLite.i2c_init();
@@ -329,22 +353,22 @@ main(int argc, char **argv)
     // Optionally configure LIDAR-Lite
     myLidarLite.configure(0);
     
-    while(1)
-    {
-        // Each time through the loop, check BUSY
-        busyFlag = myLidarLite.getBusyFlag();
+//    while(1)
+//    {
+//        // Each time through the loop, check BUSY
+//        busyFlag = myLidarLite.getBusyFlag();
 
-        if (busyFlag == 0x00)
-        {
+//        if (busyFlag == 0x00)
+//        {
             // When no longer busy, immediately initialize another measurement
             // and then read the distance data from the last measurement.
             // This method will result in faster I2C rep rates.
-            myLidarLite.takeRange();
-            distance = myLidarLite.readDistance();
+//            myLidarLite.takeRange();
+//            distance = myLidarLite.readDistance();
 
-            printf("%4d\n", distance);
-        }
-    }
+//            printf("%4d\n", distance);
+//        }
+//    }
     
 	// This program uses throw, wrap one big try/catch here
 	try
